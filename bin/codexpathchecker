@@ -1,0 +1,110 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+readonly TOOL_NAME="codexpathchecker"
+readonly START_MARKER="# >>> codexpathchecker >>>"
+readonly END_MARKER="# <<< codexpathchecker <<<"
+
+script_path=${0:A}
+script_dir=${script_path:h}
+libexec_script="${script_dir:h}/libexec/codexpathchecker.zsh"
+zshrc_path="${ZDOTDIR:-$HOME}/.zshrc"
+
+usage() {
+  cat <<EOF
+Usage: ${TOOL_NAME} <command>
+
+Commands:
+  install    Append the Codex path warning hook to ~/.zshrc
+  uninstall  Remove the Codex path warning hook from ~/.zshrc
+  status     Show whether the hook is installed
+EOF
+}
+
+require_libexec() {
+  if [[ ! -f "${libexec_script}" ]]; then
+    print -u2 -- "Missing wrapper script: ${libexec_script}"
+    exit 1
+  fi
+}
+
+install_hook() {
+  require_libexec
+
+  if [[ -f "${zshrc_path}" ]] && grep -Fq "${START_MARKER}" "${zshrc_path}"; then
+    print -- "Already installed in ${zshrc_path}"
+    return 0
+  fi
+
+  touch "${zshrc_path}"
+
+  {
+    printf '\n'
+    printf '%s\n' "${START_MARKER}"
+    printf 'if [[ -f %q ]]; then\n' "${libexec_script}"
+    printf '  source %q\n' "${libexec_script}"
+    printf 'fi\n'
+    printf '%s\n' "${END_MARKER}"
+  } >> "${zshrc_path}"
+
+  print -- "Installed hook into ${zshrc_path}"
+  print -- "Reload with: source ${zshrc_path}"
+}
+
+uninstall_hook() {
+  if [[ ! -f "${zshrc_path}" ]]; then
+    print -- "No ${zshrc_path} found"
+    return 0
+  fi
+
+  if ! grep -Fq "${START_MARKER}" "${zshrc_path}"; then
+    print -- "No hook found in ${zshrc_path}"
+    return 0
+  fi
+
+  local tmp_file
+  tmp_file=$(mktemp)
+  awk -v start="${START_MARKER}" -v end="${END_MARKER}" '
+    $0 == start { skip=1; next }
+    $0 == end { skip=0; next }
+    skip != 1 { print }
+  ' "${zshrc_path}" > "${tmp_file}"
+  mv "${tmp_file}" "${zshrc_path}"
+
+  print -- "Removed hook from ${zshrc_path}"
+}
+
+status_hook() {
+  if [[ -f "${zshrc_path}" ]] && grep -Fq "${START_MARKER}" "${zshrc_path}"; then
+    print -- "Installed in ${zshrc_path}"
+  else
+    print -- "Not installed"
+  fi
+}
+
+main() {
+  local cmd="${1:-}"
+
+  case "${cmd}" in
+    install)
+      install_hook
+      ;;
+    uninstall)
+      uninstall_hook
+      ;;
+    status)
+      status_hook
+      ;;
+    ""|-h|--help|help)
+      usage
+      ;;
+    *)
+      print -u2 -- "Unknown command: ${cmd}"
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
